@@ -5,7 +5,7 @@ def filter_bcbio_somatic(in_vcf_name,
                          max_maf,
                          max_af=0.9,
                          loh_sites=[],
-                         non_path_lst=['benign'],
+                         non_path_lst  = ['benign'],
                          loh_df=None):
 
     """Filters the bcbio output ensemble 'somatic' VCF which had somatic prioritization via gemini.
@@ -20,10 +20,8 @@ def filter_bcbio_somatic(in_vcf_name,
         Path to output VCF file.
     max_maf : float
         Max minor allelic fraction in any population to consider if not in COSMIC or pathogenic in clinvar.
-    max_af : float
-        Maximum variant allelic fraction to be considered somatic, only used when paired with loh_df
-    non_path_lst : lst(str)
-        List of clinvar labels to use as "non-pathogenic"
+    path_lst : lst(str)
+        List of clinvar labels to use as "pathogenic"
 
     """
 
@@ -32,12 +30,17 @@ def filter_bcbio_somatic(in_vcf_name,
     out_vcf = open(out_vcf_name,mode='w')
     out_vcf.write(vcf_in.header.__str__())
 
+    total_var = 0
+    infreq_var = 0
+    freq_var = 0
+
     for rec in vcf_in:
 
         info_dct = rec.info
+        total_var += 1
 
         if (info_dct['AF'][0] >= max_af) and (loh_df is not None):
-            if not var_in_loh(loh_df,rec.contig,rec.start,rec.stop):
+            if not var_in_loh(loh_df,rec.contig,rec.start, rec.stop):
                 continue
 
         if 'max_aaf_all' in info_dct.keys():
@@ -55,10 +58,9 @@ def filter_bcbio_somatic(in_vcf_name,
                     # Variant is frequent and in clinvar
                     path_label = "".join(info_dct['clinvar_sig']).lower()
                     if any(path in path_label for path in non_path_lst):
-                        # Variant is frequent and not pathogenic in clinvar
+                        # Variant is frequent but pathogenic in clinvar
                         benign_clinvar = True
                     else:
-                        # Variant is frequent but pathogenic in clinvar
                         out_vcf.write(rec.__str__())
                         continue
 
@@ -69,15 +71,24 @@ def filter_bcbio_somatic(in_vcf_name,
 
                 else:
                     # Variant is frequent and not in COSMIC or pathogenic in clinvar
+                    freq_var += 1
                     continue
 
             else:
                 # Variant is infrequent
+                infreq_var += 1
                 out_vcf.write(rec.__str__())
 
         else:
             # Variant not found in databases
+            infreq_var += 1
             out_vcf.write(rec.__str__())
+
+    # print('Input file: {}'.format(str(in_vcf_name)))
+    # print('Output file: {}'.format(str(out_vcf_name)))
+    # print('Maximum minor allelic fraction: {}\n'.format(max_maf))
+    # print('Total variants: {}'.format(total_var))
+    # print('Total filtered because frequent and not in COSMIC or pathogenic in clinvar: {}\n'.format(freq_var))
 
     out_vcf.close()
 
