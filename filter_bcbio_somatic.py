@@ -4,93 +4,45 @@ def filter_bcbio_somatic(in_vcf_name,
                          out_vcf_name,
                          max_maf,
                          max_af=0.9,
-                         loh_sites=[],
-                         non_path_lst  = ['benign'],
                          loh_df=None):
-
-    """Filters the bcbio output ensemble 'somatic' VCF which had somatic prioritization via gemini.
-
-    https://bcbio.wordpress.com/2015/03/05/cancerval/
-
-    Parameters
-    ----------
-    in_vcf : str
-        Path to input VCF file.
-    out_vcf : str
-        Path to output VCF file.
-    max_maf : float
-        Max minor allelic fraction in any population to consider if not in COSMIC or pathogenic in clinvar.
-    path_lst : lst(str)
-        List of clinvar labels to use as "pathogenic"
-
-    """
 
     vcf_in = VariantFile(in_vcf_name)
 
     out_vcf = open(out_vcf_name,mode='w')
     out_vcf.write(vcf_in.header.__str__())
 
-    total_var = 0
-    infreq_var = 0
-    freq_var = 0
-
     for rec in vcf_in:
 
-        info_dct = rec.info
-        total_var += 1
+        if 'max_aaf_all' in rec.info.keys():
+            # Found in population databases
 
-        if (info_dct['AF'][0] >= max_af) and (loh_df is not None):
-            if not var_in_loh(loh_df,rec.contig,rec.start, rec.stop):
-                continue
+            if is_frequent(rec,max_maf):
 
-        if 'max_aaf_all' in info_dct.keys():
+                if is_in_clinvar(rec) and not is_benign_in_clinvar(rec):
+                    out_vcf.write(rec.__str__())
+                    continue
 
-            if isinstance(info_dct['max_aaf_all'], float):
-                max_aaf_all = float(info_dct['max_aaf_all'])
-            else:
-                max_aaf_all = float(info_dct['max_aaf_all'][0])
-
-            if max_aaf_all > max_maf:
-                # Variant is frequent
-                benign_clinvar = False
-
-                if 'clinvar_sig' in info_dct.keys():
-                    # Variant is frequent and in clinvar
-                    path_label = "".join(info_dct['clinvar_sig']).lower()
-                    if any(path in path_label for path in non_path_lst):
-                        # Variant is frequent but pathogenic in clinvar
-                        benign_clinvar = True
-                    else:
-                        out_vcf.write(rec.__str__())
-                        continue
-
-                if 'cosmic_ids' in info_dct.keys() and not benign_clinvar:
-                    # Variant is frequent but found in COSMIC database
+                if is_cosmic_variant(rec,3):
                     out_vcf.write(rec.__str__())
                     continue
 
                 else:
-                    # Variant is frequent and not in COSMIC or pathogenic in clinvar
-                    freq_var += 1
                     continue
 
-            else:
-                # Variant is infrequent
-                infreq_var += 1
-                out_vcf.write(rec.__str__())
-
+        if is_clonal_and_not_loh(rec,max_af,loh_df):
+                continue
         else:
-            # Variant not found in databases
-            infreq_var += 1
             out_vcf.write(rec.__str__())
 
-    # print('Input file: {}'.format(str(in_vcf_name)))
-    # print('Output file: {}'.format(str(out_vcf_name)))
-    # print('Maximum minor allelic fraction: {}\n'.format(max_maf))
-    # print('Total variants: {}'.format(total_var))
-    # print('Total filtered because frequent and not in COSMIC or pathogenic in clinvar: {}\n'.format(freq_var))
+            def is_clonal_and_not_loh(rec,max_af,loh_df):
 
-    out_vcf.close()
+    likely_germ = False
+
+    if (rec.info['AF'][0] >= max_af) and (loh_df is not None):
+            if not var_in_loh(loh_df,rec.contig,rec.start,rec.stop):
+                likely_germ = True
+
+    return likely_germ
 
 def var_in_loh(loh_df,chrom,start,stop):
 
@@ -101,3 +53,43 @@ def var_in_loh(loh_df,chrom,start,stop):
             if start >= reg['start'] and stop <= reg['end']:
                 break
     return in_loh
+
+def is_frequent(rec,max_maf):
+
+    frequent = False
+
+    if 'max_aaf_all' in rec.info.keys():
+        if isinstance(rec.info['max_aaf_all'], float):
+            max_aaf_all = float(rec.info['max_aaf_all'])
+        else:
+            max_aaf_all = float(rec.info['max_aaf_all'][0])
+
+        if max_aaf_all > max_maf:
+            frequent = True
+
+    return frequent
+
+def is_in_clinvar(rec):
+    if 'dbNSFP_clinvar_clnsig' in rec.info.keys():
+        return True
+    else:
+        return False
+
+def is_benign_in_clinvar(rec):
+
+    benign = False
+
+    if '2' in rec.info['dbNSFP_clinvar_clnsig'] or '3' in rec.info['dbNSFP_clinvar_clnsig']:
+        benign = True
+
+    return benign
+
+def is_cosmic_variant(rec,min_cnt):
+
+    cosmic = False
+
+    if 'dbNSFP_COSMIC_CNT' in rec.info.keys():
+        for c in rec.info['dbNSFP_COSMIC_CNT']:
+            if c >= min_cnt:
+                cosmic = True
+    return cosmic
