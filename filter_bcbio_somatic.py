@@ -34,7 +34,7 @@ def filter_bcbio_somatic(in_vcf_name,
         else:
             out_vcf.write(rec.__str__())
 
-            def is_clonal_and_not_loh(rec,max_af,loh_df):
+def is_clonal_and_not_loh(rec,max_af,loh_df):
 
     likely_germ = False
 
